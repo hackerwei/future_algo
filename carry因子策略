@@ -1,0 +1,2411 @@
+#!/usr/bin/env python
+#  -*- coding: utf-8 -*-
+__author__ = "Xiaoli"
+
+import numpy as np
+import pandas as pd
+import akshare as ak
+
+import warnings
+warnings.filterwarnings("ignore",category=FutureWarning)
+
+from os import getcwd
+from sys import exit
+from pickle import dump, load
+from json import dumps
+from requests import post
+from tqsdk import TqApi, TqAuth, TqKq, TqAccount, TqBacktest
+from tqsdk.exceptions import TqTimeoutError
+from tqsdk.tafunc import time_to_datetime
+from tqsdk.ta import ATR
+from tqsdk.algorithm import Twap
+from time import time as tm
+from datetime import datetime, time, timedelta
+from string import digits
+from random import randint
+from prettytable import PrettyTable
+from interval import Interval
+
+
+def write_pickle(data: dict, combination_name: str):
+    """
+    Todo:
+        写入pickle文件
+
+    Args:
+        data (dict): dict格式的数据
+
+        combination_name (str): 文件名
+
+    Returns:
+        None
+    """
+    with open(getcwd() + "\\" + "{}{}".format(combination_name, ".plk"), "wb") as f:
+
+        dump(data, f)
+
+
+def read_pickle(combination_name: str):
+    """
+    Todo:
+        读取pickle文件
+
+    Args:
+        combination_name (str): 文件名
+
+    Returns:
+        data (dict): dict格式的数据
+    """
+    data = {}
+
+    try:
+
+        with open(getcwd() + "\\" + "{}{}".format(combination_name, ".plk"), "rb") as f:
+
+            data = load(f)
+
+    except Exception as e:
+
+        print("读取文件失败，原因：{}".format(e))
+
+    return data
+
+
+def sent_ding_msg(content: str) -> None:
+    """
+    Todo:
+        发送钉钉消息
+
+    Args:
+        content (str): 要发送的消息内容
+
+    Returns:
+        None
+
+    Tips:
+        1. robot_id处填写钉钉机器人的robot_id
+        2. robot_key处填写钉钉机器人的关键字
+    """
+    robot_id = ""
+    robot_key = ""
+    msg = {
+        "msgtype": "text",
+        "text": {"content": "{}\n{}\n{}".format(content, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), robot_key)},
+    }
+    headers = {"content-type": "application/json;charset=utf-8"}
+    url = "https://oapi.dingtalk.com/robot/send?access_token=" + robot_id
+    body = dumps(msg)
+    post(url, data=body, headers=headers)
+
+
+def set_global_parameter() -> None:
+    """
+    Todo:
+        设定全局变量（策略参数）
+
+    Args:
+        None
+
+    Returns:
+        None
+
+    Tips:
+        参数定义见备注
+    """
+    global tq_user_name, tq_password, broker_id, account_id, password, strategy_name, strategy_id, all_symbol_list, excluding_symbol_list, max_risk, max_value, max_loss, n_atr_stop, min_rank, open_position_time, close_position_time, order_price_limit, keep_time, max_value_today, grid_amount, grid_region
+
+    # 天勤账号
+    tq_user_name = ""
+    # 天勤密码
+    tq_password = ""
+    # 经纪商
+    broker_id = ""
+    # 资金账号
+    account_id = ""
+    # 交易密码
+    password = ""
+    # 策略名称
+    strategy_name = "carry"
+    # 策略id
+    strategy_id = "123"
+    # 商品期货品种列表
+    all_symbol_list = [
+        "SHFE.au",
+        "SHFE.ag",
+        "SHFE.cu",
+        "SHFE.al",
+        "SHFE.zn",
+        "SHFE.pb",
+        "SHFE.ni",
+        "SHFE.sn",
+        "SHFE.ss",
+        "SHFE.rb",
+        "INE.sc",
+        "SHFE.fu",
+        "DCE.pg",
+        "INE.lu",
+        "CZCE.FG",
+        "SHFE.ru",
+        "INE.nr",
+        "DCE.l",
+        "DCE.v",
+        "CZCE.TA",
+        "CZCE.PF",
+        "CZCE.MA",
+        "DCE.pp",
+        "DCE.eb",
+        "SHFE.bu",
+        "DCE.eg",
+        "CZCE.UR",
+        "CZCE.SA",
+        "DCE.jm",
+        "DCE.j",
+        "DCE.i",
+        "SHFE.hc",
+        "CZCE.SM",
+        "CZCE.SF",
+        "SHFE.sp",
+        "DCE.a",
+        "DCE.c",
+        "DCE.m",
+        "CZCE.RM",
+        "CZCE.PK",
+        "DCE.y",
+        "DCE.p",
+        "CZCE.OI",
+        "CZCE.CF",
+        "CZCE.SR",
+        "DCE.jd",
+        "DCE.cs",
+        "CZCE.AP",
+        "CZCE.CJ",
+        "DCE.lh",
+        "GFEX.si"
+    ]
+    # 不开仓商品期货品种列表
+    excluding_symbol_list = [
+        "INE.nr",
+        "CZCE.CJ",
+    ]
+    # 账户最大风险度
+    max_risk = 0.9
+    # 开仓组合货值
+    max_value = 4000000
+    # 单笔交易最大损失
+    max_loss = 50000
+    # 单笔交易atr止损倍数
+    n_atr_stop = 2
+    # 最低展期收益率排名
+    min_rank = 5
+    # 开仓时间
+    open_position_time = [time(21, 5), time(9, 5)]
+    # 平仓时间
+    close_position_time = [time(22, 55), time(14, 55)]
+    # 涨跌停限制
+    order_price_limit = 0.03
+    # 未成委托单保留时间:秒
+    keep_time = 60
+
+    # 日内交易参数
+    # 日内开仓货值
+    max_value_today = 1000000
+    # 网格数量
+    grid_amount = 10
+    # 网格密度
+    grid_region = 0.005
+
+
+def tqkq_log_in() -> None:
+    """
+    Todo:
+        天勤账号登录
+
+    Args:
+        None
+
+    Returns:
+        None
+
+    Example:
+        实盘登录
+        api = TqApi(account=TqAccount(broker_id=broker_id, account_id=account_id,
+                password=password), auth=TqAuth(user_name=tq_user_name, password=tq_password), debug=False)
+    """
+    global api
+
+    try:
+
+        api = TqApi(account=TqKq(), auth=TqAuth(
+            user_name=tq_user_name, password=tq_password), debug=False)
+
+    except Exception as e:
+
+        print("登录失败，原因：{}".format(e))
+        exit(0)
+
+
+def read_position_info_dict() -> None:
+    """
+    Todo:
+        读取本地持仓记录
+
+    Args:
+        None
+
+    Returns:
+        dict: dict格式的持仓记录
+
+    Example:
+        position_info_dict:{
+        "CZCE.SR305":{
+        "symbol":"CZCE.SR305",
+        "pos":10,
+        "pos_long":10,
+        "pos_long_today":10,
+        "pos_long_his":10,
+        "pos_short":0,
+        "pos_short_today":0,
+        "pos_short_his":0,
+        "open_price_long":6000,
+        "open_price_short":np.nan,
+        "margin_long":60000,
+        "margin_short":0,
+        "target_pos_long":10,
+        "target_pos_short":0,
+        "high":0,
+        "low":0,
+        "status":"unlocked",
+        "created_at":datetime(2023,3,22,10,31,55),
+        "updated_at":datetime(2023,3,22,10,31,55),
+        },
+        ......
+        }
+    """
+    global position_info_dict
+
+    position_info_dict = read_pickle(
+        combination_name=strategy_name + strategy_id + "_data")
+
+
+def subscribe_account() -> None:
+    """
+    Todo:
+        订阅账户信息
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global account
+
+    account = {}
+
+    try:
+
+        account = api.get_account()
+
+    except Exception as e:
+
+        print("订阅账户信息失败，原因：{}".format(e))
+
+
+def subscribe_position() -> None:
+    """
+    Todo:
+        订阅持仓信息
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global position
+
+    position = {}
+
+    try:
+
+        position = api.get_position()
+
+    except Exception as e:
+
+        print("订阅持仓信息失败，原因：{}".format(e))
+
+
+def subscribe_all_orders() -> None:
+    """
+    Todo:
+        订阅所有委托单信息
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global all_orders
+
+    all_orders = {}
+
+    try:
+
+        all_orders = api.get_order()
+
+    except Exception as e:
+
+        print("订阅所有委托单信息失败，原因：{}".format(e))
+
+
+def subscribe_all_trades() -> None:
+    """
+    Todo:
+        订阅所有成交信息
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global all_trades
+
+    all_trades = {}
+
+    try:
+
+        all_trades = api.get_trade()
+
+    except Exception as e:
+
+        print("订阅所有成交信息失败，原因：{}".format(e))
+
+
+def get_cont_index_dict() -> None:
+    """
+    Todo:
+        获取所有指数合约和主力合约的对应关系字典
+
+    Args:
+        None
+
+    Returns:
+        None
+
+    Tips:
+        all_index_cont_dict:指数合约和主力合约的对应关系字典
+        all_cont_index_dict:主力合约和指数合约的对应关系字典
+    """
+    global all_index_cont_dict, all_cont_index_dict, all_product_id_index_dict
+
+    all_cont_symbol_list = []
+
+    for symbol in globals()["all_symbol_list"]:
+
+        main_symbol = ""
+
+        try:
+
+            symbol_list = api.query_quotes(
+                ins_class="FUTURE", product_id=symbol.split(sep=".")[-1], expired=False)
+            open_interest_dict = dict(zip(symbol_list, [api.get_quote(symbol=symbol)[
+                "open_interest"] for symbol in symbol_list]))
+            main_symbol = max(zip(open_interest_dict.values(),
+                              open_interest_dict.keys()))[-1]
+
+        except Exception as e:
+
+            print("获取主力合约失败，原因：{}".format(e))
+
+        all_cont_symbol_list.append(main_symbol)
+
+    # all_cont_symbol_list = [symbol for symbol in api.query_cont_quotes() if symbol.translate(str.maketrans("", "", digits)) in globals()["all_symbol_list"]]
+    all_index_symbol_list = [
+        "KQ.i@" + symbol.translate(str.maketrans("", "", digits)) for symbol in all_cont_symbol_list]
+
+    all_index_cont_dict = dict(
+        zip(all_index_symbol_list, all_cont_symbol_list))
+    all_cont_index_dict = dict(
+        zip(all_cont_symbol_list, all_index_symbol_list))
+    all_product_id_index_dict = dict(zip([index.split(
+        sep=".")[-1] for index in all_index_symbol_list], all_index_symbol_list))
+
+
+def get_futures_comm_info_df() -> None:
+    """
+    Todo:
+        获取手续费保证金信息
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global futures_comm_info_df
+
+    futures_comm_info_df = pd.DataFrame()
+
+    try:
+
+        futures_comm_info_df = ak.futures_comm_info(symbol="所有")
+
+    except Exception as e:
+
+        print("获取手续费保证金信息失败，原因：{}".format(e))
+
+
+def subscribe_all_quote() -> None:
+    """
+    Todo:
+        订阅所有合约的盘口行情
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+
+    symbol_list = list(set(all_cont_index_dict) | set(
+        all_index_cont_dict) | set(position_info_dict.keys()))
+
+    for symbol in symbol_list:
+
+        globals()[symbol + "_quote"] = {}
+
+        try:
+
+            globals()[symbol + "_quote"] = api.get_quote(symbol=symbol)
+
+        except Exception as e:
+
+            print("获取{}盘口行情失败，原因：{}".format(symbol, e))
+
+
+def subscribe_all_klines() -> None:
+    """
+    Todo:
+        订阅所有合约的K线行情
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+
+    symbol_list = list(set(all_cont_index_dict) | set(
+        all_index_cont_dict) | set(position_info_dict.keys()))
+
+    for symbol in symbol_list:
+
+        globals()[symbol + "_min_klines"] = pd.DataFrame()
+
+        try:
+
+            globals()[symbol + "_min_klines"] = api.get_kline_serial(
+                symbol=symbol, duration_seconds=60, data_length=555)
+
+        except Exception as e:
+
+            print("获取{}分钟线行情失败，原因：{}".format(symbol, e))
+
+    for symbol in symbol_list:
+
+        globals()[symbol + "_day_klines"] = pd.DataFrame()
+
+        try:
+
+            globals()[symbol + "_day_klines"] = api.get_kline_serial(
+                symbol=symbol, duration_seconds=60 * 60 * 24, data_length=200)
+
+        except Exception as e:
+
+            print("获取{}日线行情失败，原因：{}".format(symbol, e))
+
+
+def creat_main_symbol() -> None:
+    """
+    Todo:
+        创建策略的主合约以对齐行情时间
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+
+    global main_symbol, main_symbol_quote, main_symbol_klines
+
+    main_symbol = all_index_cont_dict.get("KQ.i@SHFE.au")
+    main_symbol_quote = globals()[main_symbol +
+                                  "_quote"] if main_symbol else {}
+    main_symbol_klines = globals(
+    )[main_symbol + "_min_klines"] if main_symbol else pd.DataFrame()
+
+
+def get_position_info_dict() -> None:
+    """
+    Todo:
+        获取持仓信息字典
+
+    Args:
+        None
+
+    Returns:
+        hold_position_dict(dict) : 持仓信息字典
+    """
+    hold_position_dict = dict(zip(position.keys(),
+                              [
+        dict(zip(position[symbol].keys(), position[symbol].values())) for symbol in position.keys()
+    ]
+    ))
+
+    return hold_position_dict
+
+
+def get_all_orders_dict() -> None:
+    """
+    Todo:
+        获取所有订单信息字典
+
+    Args:
+        None
+
+    Returns:
+        all_orders_dict(dict) : 所有订单信息字典
+    """
+    all_orders_dict = dict(zip(all_orders.keys(),
+                               [
+        dict(zip(all_orders[order_id].keys(), all_orders[order_id].values())) for order_id in all_orders.keys()
+    ]
+    ))
+
+    return all_orders_dict
+
+
+def get_all_trades_dict() -> None:
+    """
+    Todo:
+        获取所有成交信息字典
+
+    Args:
+        None
+
+    Returns:
+        all_trade_dict(dict) : 所有订单信息字典
+    """
+    all_trade_dict = dict(zip(all_trades.keys(),
+                              [
+        dict(zip(all_trades[trade_id].keys(), all_trades[trade_id].values())) for trade_id in all_trades.keys()
+    ]
+    ))
+
+    return all_trade_dict
+
+
+def sync_position_info_dict() -> None:
+    """
+    Todo:
+        同步账户持仓信息和本地持仓记录
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global position_info_dict
+
+    hold_position_dict = get_position_info_dict()
+    all_orders_dict = get_all_orders_dict()
+
+    for symbol, info in position_info_dict.copy().items():
+
+        # 同步账户持仓信息和持仓记录
+        if symbol in hold_position_dict.keys():
+
+            quote = globals()[symbol + "_quote"].copy() if symbol + \
+                "_quote" in globals() else api.get_quote(symbol=symbol)
+            market_time = time_to_datetime(
+                main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+
+            order_list_alive = [order_id for order_id, order_info in all_orders_dict.items(
+            ) if order_info["instrument_id"] == symbol.split(sep=".")[-1] and order_info["status"] == "ALIVE"]
+            position_info_dict[symbol]["status"] = "locked" if order_list_alive else "unlocked"
+
+            if position_info_dict[symbol]["status"] == "unlocked":
+
+                position_info_dict[symbol]["pos_long"] = min(
+                    hold_position_dict[symbol]["pos_long"], info["pos_long"])
+                position_info_dict[symbol]["pos_long_today"] = min(
+                    hold_position_dict[symbol]["pos_long_today"], info["pos_long_today"])
+                position_info_dict[symbol]["pos_long_his"] = info["pos_long"] - \
+                    info["pos_long_today"]
+                position_info_dict[symbol]["pos_short"] = min(
+                    hold_position_dict[symbol]["pos_short"], info["pos_short"])
+                position_info_dict[symbol]["pos_short_today"] = min(
+                    hold_position_dict[symbol]["pos_short_today"], info["pos_short_today"])
+                position_info_dict[symbol]["pos_short_his"] = info["pos_short"] - \
+                    info["pos_short_today"]
+
+                position_info_dict[symbol]["pos"] = position_info_dict[symbol]["pos_long"] - \
+                    position_info_dict[symbol]["pos_short"]
+
+                position_info_dict[symbol]["open_price_long"] = max(
+                    hold_position_dict[symbol]["open_price_long"], position_info_dict[symbol]["open_price_long"])if hold_position_dict[symbol]["pos_long"] > 0 else np.nan
+                position_info_dict[symbol]["open_price_short"] = min(
+                    hold_position_dict[symbol]["open_price_short"], position_info_dict[symbol]["open_price_short"])if hold_position_dict[symbol]["pos_short"] > 0 else np.nan
+
+                position_info_dict[symbol]["margin_long"] = hold_position_dict[symbol]["margin_long"]/hold_position_dict[symbol]["pos_long"] * \
+                    info["pos_long"] if hold_position_dict[symbol]["pos_long"] > 0 else 0
+                position_info_dict[symbol]["margin_short"] = hold_position_dict[symbol]["margin_short"]/hold_position_dict[symbol]["pos_short"] * \
+                    info["pos_short"] if hold_position_dict[symbol]["pos_short"] > 0 else 0
+
+                position_info_dict[symbol]["high"] = max(
+                    info["high"], quote.get("last_price", np.nan))
+                position_info_dict[symbol]["low"] = min(
+                    info["low"], quote.get("last_price", np.nan))
+
+                position_info_dict[symbol]["updated_at"] = market_time
+
+    for symbol, info in position_info_dict.copy().items():
+
+        # 删除已无持仓的持仓记录
+        if symbol not in hold_position_dict.keys() or ((info["pos"] == info["pos_long_his"] == info["pos_long_today"] == info["pos_short_his"] == info["pos_short_today"] == 0) and info["status"] == "unlocked"):
+
+            position_info_dict.pop(symbol)
+
+    # 写入文件
+    write_pickle(data=position_info_dict,
+                 combination_name=strategy_name+strategy_id+"_data")
+
+    # 输出
+    market_time = time_to_datetime(
+        main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+
+    out_table.clear_rows()
+
+    for symbol, info in position_info_dict.copy().items():
+
+        out_table.add_row(
+            [
+                info["symbol"],
+                info["pos"],
+                info["pos_long"],
+                info["pos_long_today"],
+                info["pos_long_his"],
+                info["pos_short"],
+                info["pos_short_today"],
+                info["pos_short_his"],
+                info["open_price_long"],
+                info["open_price_short"],
+                info["margin_long"],
+                info["margin_short"],
+                info["target_pos_long"],
+                info["target_pos_short"],
+                info["high"],
+                info["low"],
+                info["status"],
+                info["created_at"],
+                info["updated_at"],
+            ]
+        )
+
+    print("----------", market_time, "----------")
+    print(out_table)
+
+
+def get_his_rolling_yield_data(product_id_list: list):
+    """
+    Todo:
+        获取历史展期收益率数据
+
+    Args:
+        param product_id_list(list): 产品id列表
+
+    Return:
+        his_rolling_yield_data_df(pd.DataFrame): 历史展期收益率数据
+    """
+    trading_calendar = api.get_trading_calendar(
+        start_dt=datetime.now()-timedelta(days=200), end_dt=datetime.now())
+    trading_date = trading_calendar[trading_calendar["trading"]
+                                    == True]["date"].to_list() if not trading_calendar.empty else []
+    trading_date_list = [time_to_datetime(
+        i).date() for i in trading_date][-11:-1] if len(trading_date) >= 11 else []
+
+    try:
+
+        his_rolling_yield_data_df = pd.read_csv(getcwd() + "\\" + "{}{}".format(
+            "his_rolling_yield_data_df", ".csv"), index_col=[0, 1], parse_dates=True)
+        gap_date_list = list(
+            set(trading_date_list)-set([time_to_datetime(i).date() for i in his_rolling_yield_data_df.index.get_level_values(0)]))
+
+    except Exception as e:
+
+        print("读取历史数据文件失败，原因：{}".format(e))
+        his_rolling_yield_data_df = pd.DataFrame(index=pd.MultiIndex.from_product([trading_date_list, product_id_list], names=["trading_date", "product_id"]),
+                                                 columns=["main_symbol", "sub_symbol", "main_symbol_close", "sub_symbol_close", "rolling_yield"])
+        gap_date_list = trading_date_list
+
+    print("gap_date_list:", gap_date_list)
+
+    his_rolling_yield_data_df_new = pd.DataFrame(index=pd.MultiIndex.from_product([gap_date_list, product_id_list], names=["trading_date", "product_id"]),
+                                                 columns=["main_symbol", "sub_symbol", "main_symbol_close", "sub_symbol_close", "rolling_yield"])
+
+    for appointed_date, product_id in his_rolling_yield_data_df_new.index:
+
+        all_available_symbol_list = []
+        all_symbol = api.query_quotes(
+            ins_class="FUTURE", product_id=product_id)
+
+        for symbol in all_symbol:
+
+            try:
+
+                klines_data = api.get_kline_serial(
+                    symbol=symbol, duration_seconds=86400, data_length=200)
+
+            except Exception as e:
+
+                print("获取{}行情数据失败,原因:{}".format(symbol, e))
+                klines_data = pd.DataFrame()
+
+            else:
+
+                klines_data["date"] = klines_data["datetime"].apply(
+                    lambda x: time_to_datetime(x).date())
+
+            if not klines_data.empty:
+
+                if klines_data.iloc[-11]["date"] >= trading_date_list[0]:
+
+                    all_available_symbol_list.append(symbol)
+
+        all_available_symbol_info_df = pd.DataFrame(index=pd.MultiIndex.from_product([[appointed_date], all_available_symbol_list], names=["trading_date", "symbol"]),
+                                                    columns=["open_oi", "volume", "close", "expire_datetime"])
+        for index_level1, index_level2 in all_available_symbol_info_df.index:
+
+            try:
+
+                klines_data = api.get_kline_serial(
+                    symbol=index_level2, duration_seconds=86400, data_length=200)
+
+            except Exception as e:
+
+                print("获取{}行情数据失败,原因:{}".format(index_level2, e))
+                klines_data = pd.DataFrame()
+
+            else:
+
+                klines_data["date"] = klines_data["datetime"].apply(
+                    lambda x: time_to_datetime(x).date())
+                klines_data.set_index(keys="date", inplace=True)
+
+            if not klines_data.empty:
+
+                all_available_symbol_info_df.loc[(index_level1, index_level2),
+                                                 "open_oi"] = klines_data.loc[index_level1, "open_oi"]
+                all_available_symbol_info_df.loc[(index_level1, index_level2),
+                                                 "close"] = klines_data.loc[index_level1, "close"]
+                all_available_symbol_info_df.loc[(index_level1, index_level2),
+                                                 "volume"] = klines_data.loc[index_level1, "volume"]
+
+                try:
+
+                    quote_info = api.get_quote(symbol=index_level2)
+
+                except Exception as e:
+
+                    print("获取{}行情数据失败,原因:{}".format(index_level2, e))
+                    all_available_symbol_info_df.loc[(index_level1, index_level2),
+                                                     "expire_datetime"] = datetime.now()
+
+                else:
+
+                    all_available_symbol_info_df.loc[(index_level1, index_level2),
+                                                     "expire_datetime"] = quote_info["expire_datetime"]
+
+        if len(all_available_symbol_info_df) >= 2:
+
+            all_available_symbol_info_df.sort_values(
+                by="open_oi", ascending=False, inplace=True)
+
+            main_symbol = all_available_symbol_info_df.index[0][1]
+            sub_symbol = all_available_symbol_info_df[all_available_symbol_info_df["expire_datetime"]
+                                                      > all_available_symbol_info_df.iloc[0]["expire_datetime"]].index[0][1]
+            main_symbol_close = all_available_symbol_info_df.iloc[0]["close"]
+            sub_symbol_close = all_available_symbol_info_df[all_available_symbol_info_df["expire_datetime"]
+                                                            > all_available_symbol_info_df.iloc[0]["expire_datetime"]].iloc[0]["close"]
+
+            main_symbol_expire_datetime = time_to_datetime(
+                all_available_symbol_info_df.iloc[0]["expire_datetime"]).date()
+            sub_symbol_expire_datetime = time_to_datetime(all_available_symbol_info_df[all_available_symbol_info_df["expire_datetime"]
+                                                                                       > all_available_symbol_info_df.iloc[0]["expire_datetime"]].iloc[0]["expire_datetime"]).date()
+
+            his_rolling_yield_data_df_new.loc[(
+                appointed_date, product_id), "main_symbol"] = main_symbol
+            his_rolling_yield_data_df_new.loc[(
+                appointed_date, product_id), "sub_symbol"] = sub_symbol
+            his_rolling_yield_data_df_new.loc[(
+                appointed_date, product_id), "main_symbol_close"] = main_symbol_close
+            his_rolling_yield_data_df_new.loc[(
+                appointed_date, product_id), "sub_symbol_close"] = sub_symbol_close
+            his_rolling_yield_data_df_new.loc[(
+                appointed_date, product_id), "rolling_yield"] = (np.log(main_symbol_close)-np.log(sub_symbol_close))*365/((appointed_date-sub_symbol_expire_datetime).days - (appointed_date-main_symbol_expire_datetime).days)
+
+    his_rolling_yield_data_df.update(his_rolling_yield_data_df_new)
+
+    if gap_date_list:
+
+        his_rolling_yield_data_df = pd.concat(
+            [his_rolling_yield_data_df, his_rolling_yield_data_df_new], axis=0)
+
+    his_rolling_yield_data_df = his_rolling_yield_data_df.sort_index(level=0).drop_duplicates(
+        keep="last").iloc[-len(trading_date_list)*len(product_id_list):]
+
+    his_rolling_yield_data_df.to_csv(
+        getcwd() + "\\" + "{}{}".format("his_rolling_yield_data_df", ".csv"))
+
+    return his_rolling_yield_data_df
+
+
+def get_rank_df() -> None:
+    """
+    Todo:
+        整合因子数据，计算因子排名
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global rank_df
+
+    all_product_id_list = []
+
+    all_cont_list = ["KQ.m@"+symbol for symbol in all_symbol_list]
+
+    for cont in all_cont_list:
+
+        try:
+
+            klines_data = api.get_kline_serial(
+                symbol=cont, duration_seconds=86400, data_length=100)
+
+        except Exception as e:
+
+            print("获取{}行情数据失败,原因:{}".format(cont, e))
+
+        else:
+
+            if (klines_data["volume"]*klines_data["close"]).mean() > 500000000:
+
+                all_product_id_list.append(cont.split(sep=".")[-1])
+
+    his_rolling_yield_data_df = get_his_rolling_yield_data(
+        product_id_list=all_product_id_list)
+
+    rank_df = his_rolling_yield_data_df.groupby(
+        "product_id").agg({"rolling_yield": "mean"}).sort_values(by="rolling_yield", ascending=False) if not his_rolling_yield_data_df.empty else pd.DataFrame()
+
+
+def get_hold_position_list_long() -> list:
+    """
+    Todo:
+        排序法计算短线多头持仓品种列表
+
+    Args:
+        None
+
+    Returns:
+        hold_position_list_long(list) : 短线多头品种列表
+    """
+    hold_position_list_long = [
+        all_index_cont_dict[all_product_id_index_dict[product_id]] for product_id in rank_df.index[-min_rank:] if rank_df.loc[product_id, "rolling_yield"] < 0] if not rank_df.empty else []
+
+    return hold_position_list_long
+
+
+def get_hold_position_list_short() -> list:
+    """
+    Todo:
+        排序法计算短线空头持仓品种列表
+
+    Args:
+        None
+
+    Returns:
+        hold_position_list_short(list) : 短线空头品种列表
+    """
+    hold_position_list_short = [
+        all_index_cont_dict[all_product_id_index_dict[product_id]] for product_id in rank_df.index[:min_rank] if rank_df.loc[product_id, "rolling_yield"] > 0] if not rank_df.empty else []
+
+    return hold_position_list_short
+
+
+def get_hold_position_list() -> None:
+    """
+    Todo:
+        排序法计算持仓品种列表
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global hold_position_list_long, hold_position_list_short
+
+    hold_position_list_long = get_hold_position_list_long()
+    hold_position_list_short = get_hold_position_list_short()
+
+    print("多头合约列表:", hold_position_list_long)
+    print("空头合约列表:", hold_position_list_short)
+
+
+def creat_strategy_orders_dict() -> None:
+    """
+    Todo:
+        创建策略订单字典
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global strategy_orders_dict
+
+    strategy_orders_dict = {}
+
+
+def subscribe_all() -> None:
+    """
+    Todo:
+        订阅所有信息
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    subscribe_account()
+    subscribe_position()
+    subscribe_all_orders()
+    subscribe_all_trades()
+    get_cont_index_dict()
+    subscribe_all_quote()
+    subscribe_all_klines()
+
+
+def set_out_table() -> None:
+    """
+    Todo:
+        设置一个PrettyTable用于输出
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global out_table
+
+    out_table = PrettyTable()
+    out_table.field_names = ["symbol", "pos", "pos_long", "pos_long_today", "pos_long_his", "pos_short", "pos_short_today", "pos_short_his", "open_price_long",
+                             "open_price_short", "margin_long", "margin_short", "target_pos_long", "target_pos_short", "high", "low", "status", "created_at", "updated_at"]
+
+
+def set_global_var() -> None:
+    """
+    Todo:
+        创建策略需要的全局变量
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    read_position_info_dict()
+    subscribe_all()
+    creat_main_symbol()
+    set_out_table()
+    sync_position_info_dict()
+    get_futures_comm_info_df()
+    creat_strategy_orders_dict()
+    get_rank_df()
+    get_hold_position_list()
+
+
+def calc_symbol_volatility_reciprocal_weight(symbol_list: list, periods: int = 1, window: int = 20) -> dict:
+    """
+    Todo:
+        波动率倒数加权方式计算组合权重
+
+    Args:
+        symbol_list(list) : 合约代码列表
+        periods(int) : 波动率计算周期
+        window(int) : 波动率计算窗口
+
+    Returns:
+        symbol_volatility_reciprocal_weight_dict(dict) : 组合权重字典
+    """
+    klines_data = pd.DataFrame()
+
+    for symbol in symbol_list:
+
+        day_klines = globals()[symbol + "_day_klines"].copy() if symbol + "_day_klines" in globals(
+        ) else api.get_kline_serial(symbol=symbol, duration_seconds=60*60*24, data_length=200)
+
+        if day_klines.empty:
+
+            klines_data[symbol] = [0]*len(klines_data)
+
+        else:
+
+            klines_data[symbol] = day_klines["close"].to_list()
+
+    market_volatility_data = klines_data.pct_change(
+        periods=periods).rolling(window=window).std().fillna(0)
+
+    symbol_volatility_reciprocal_weight_dict = dict(zip(symbol_list, [
+                                                    1/market_volatility_data.iloc[-1][symbol]/sum(1/market_volatility_data.iloc[-1]) for symbol in symbol_list]))
+
+    return symbol_volatility_reciprocal_weight_dict
+
+
+def calc_open_position_volume_dict(symbol_list: list, periods: int = 1, window: int = 20, max_value: int = 5000000, max_loss: int = 50000, n_atr_stop: int = 2) -> dict:
+    """
+    Todo:
+        根据组合权重计算开仓手数
+
+    Args:
+        symbol_list(list) : 合约代码列表
+        periods(int) : 波动率计算周期
+        window(int) : 波动率计算窗口
+        max_value(int) : 组合市值
+
+    Returns:
+        symbol_volume_dict(dict) : 各品种开仓手数字典
+    """
+    symbol_volatility_reciprocal_weight_dict = calc_symbol_volatility_reciprocal_weight(
+        symbol_list=symbol_list, periods=periods, window=window)
+
+    symbol_value_dict = dict(zip(symbol_list, [
+                             globals()[symbol+"_quote"].get("last_price", 0)*globals()[symbol+"_quote"].get("volume_multiple", 20) if globals()[symbol+"_quote"].get("last_price", 0) > 0 else 0 for symbol in symbol_list]))
+
+    symbol_volume_dict = dict(zip(symbol_list, [int(
+        max_value*symbol_volatility_reciprocal_weight_dict[symbol]/symbol_value_dict[symbol]) if symbol_value_dict[symbol] > 0 else 0 for symbol in symbol_list]))
+
+    for symbol, volume in symbol_volume_dict.copy().items():
+
+        day_klines = globals()[symbol + "_day_klines"].copy() if symbol + "_day_klines" in globals(
+        ) else api.get_kline_serial(symbol=symbol, duration_seconds=60*60*24, data_length=200)
+        quote = globals()[symbol + "_quote"] if symbol + \
+            "_quote" in globals() else api.get_quote(symbol=symbol)
+
+        atr_value = ATR(
+            df=day_klines, n=14).iloc[-1]["atr"] if not day_klines.empty else np.nan
+        max_volume = int(max_loss/atr_value/n_atr_stop /
+                         quote["volume_multiple"]) if atr_value > 0 and quote.get("volume_multiple", 0) > 0 else 0
+
+        theory_volume = 0
+
+        if symbol in hold_position_list_long:
+
+            if day_klines.iloc[-1]["close"] > day_klines.iloc[-10:]["close"].mean():
+
+                if day_klines.iloc[-1]["volume"] < day_klines.iloc[-10:]["volume"].mean() and day_klines.iloc[-1]["open_oi"] < day_klines.iloc[-10:]["open_oi"].mean():
+
+                    theory_volume = int(min(volume, max_volume)*0.5)
+
+                else:
+
+                    theory_volume = min(volume, max_volume)
+
+        if symbol in hold_position_list_short:
+
+            if day_klines.iloc[-1]["close"] < day_klines.iloc[-10:]["close"].mean():
+
+                if day_klines.iloc[-1]["volume"] < day_klines.iloc[-10:]["volume"].mean() and day_klines.iloc[-1]["open_oi"] < day_klines.iloc[-10:]["open_oi"].mean():
+
+                    theory_volume = int(min(volume, max_volume)*0.5)
+
+                else:
+
+                    theory_volume = min(volume, max_volume)
+
+        symbol_volume_dict[symbol] = theory_volume
+
+    return symbol_volume_dict
+
+
+def open_position(symbol: str, direction: str, offset: str, volume: int, limit_price: float = None) -> None:
+    """
+    Todo:
+        策略开仓
+
+    Args:
+        symbol(str) : 合约代码
+        direction(str) : 买卖方向
+        offset(str) : 开平方向
+        volume(int) : 手数
+        limit_price(float) : 委托价格
+
+    Returns:
+        None
+    """
+    quote = globals()[symbol + "_quote"] if symbol + \
+        "_quote" in globals() else api.get_quote(symbol=symbol)
+
+    quote_time = time_to_datetime(quote.get("datetime", datetime.now()))
+    market_time = time_to_datetime(
+        main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+
+    tradingtime_interval = [Interval(i[0], i[1]) for i in [
+        i for i in quote.get("trading_time", {"day": []}).get("day", [])]]+[Interval(i[0], i[1]) for i in [
+            i for i in quote.get("trading_time", {"night": []}).get("night", [])]]
+
+    open_price = limit_price if limit_price and limit_price % quote.get("price_tick", np.nan) == 0 else quote.get(
+        "last_price", np.nan)
+    open_volume = volume
+    open_security_deposit = futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(
+        sep=".")[-1]].iloc[-1]["保证金-每手"]*open_volume if not futures_comm_info_df.empty and not futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(sep=".")[-1]].empty else quote.get("margin", np.nan)*open_volume
+
+    cond1 = open_price > 0
+    cond2 = open_price < quote.get("upper_limit", np.nan)*(
+        1-order_price_limit) if direction == "BUY" else open_price > quote.get("lower_limit", np.nan)*(1+order_price_limit)
+    cond3 = open_volume > 0
+    cond4 = abs(market_time-quote_time) < timedelta(seconds=120)
+    cond5 = any([market_time.strftime("%H:%M:%S")
+                in interval for interval in tradingtime_interval])
+    cond6 = symbol.translate(str.maketrans(
+        "", "", digits)) not in excluding_symbol_list
+    cond7 = account["available"] > open_security_deposit
+    cond8 = account["risk_ratio"] < max_risk
+
+    if all([cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8]):
+
+        order = api.insert_order(
+            symbol=symbol, direction=direction, offset=offset, volume=open_volume, limit_price=open_price)
+
+        api.wait_update()
+
+        strategy_orders_dict[order["order_id"]] = order
+
+        if position_info_dict.get(symbol):
+
+            position_info_dict[symbol]["target_pos_long"] = position_info_dict[symbol]["target_pos_long"] + open_volume if direction == "BUY" and position_info_dict[symbol]["target_pos_long"] == position_info_dict[
+                symbol]["pos_long"] else position_info_dict[symbol]["target_pos_long"]
+            position_info_dict[symbol]["target_pos_short"] = position_info_dict[symbol]["target_pos_short"] + open_volume if direction == "SELL" and position_info_dict[symbol]["target_pos_short"] == position_info_dict[
+                symbol]["pos_short"] else position_info_dict[symbol]["target_pos_short"]
+            position_info_dict[symbol]["status"] = "locked"
+            position_info_dict[symbol]["updated_at"] = market_time
+
+        else:
+
+            position_info_dict[symbol] = {
+                "symbol": symbol,
+                "pos": 0,
+                "pos_long": 0,
+                "pos_long_today": 0,
+                "pos_long_his": 0,
+                "pos_short": 0,
+                "pos_short_today": 0,
+                "pos_short_his": 0,
+                "open_price_long": np.nan,
+                "open_price_short": np.nan,
+                "margin_long": 0,
+                "margin_short": 0,
+                "target_pos_long": open_volume if direction == "BUY" else 0,
+                "target_pos_short": open_volume if direction == "SELL" else 0,
+                "high": open_price,
+                "low": open_price,
+                "status": "locked",
+                "created_at": market_time,
+                "updated_at": market_time
+            }
+
+
+def open_position_after_cancel(symbol: str, direction: str, offset: str, volume: int) -> None:
+    """
+    Todo:
+        开仓撤单后的追单
+
+    Args:
+        symbol(str) : 合约代码
+        direction(str) : 买卖方向
+        offset(str) : 开平方向
+        volume(int) : 手数
+        limit_price(float) : 委托价格
+
+    Returns:
+        None
+    """
+    quote = globals()[symbol + "_quote"] if symbol + \
+        "_quote" in globals() else api.get_quote(symbol=symbol)
+
+    quote_time = time_to_datetime(quote.get("datetime", datetime.now()))
+    market_time = time_to_datetime(
+        main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+
+    tradingtime_interval = [Interval(i[0], i[1]) for i in [
+        i for i in quote.get("trading_time", {"day": []}).get("day", [])]]+[Interval(i[0], i[1]) for i in [
+            i for i in quote.get("trading_time", {"night": []}).get("night", [])]]
+
+    open_price = quote.get(
+        "ask_price1", np.nan) if direction == "BUY" else quote.get("bid_price1", np.nan)
+
+    open_volume = volume
+    open_security_deposit = futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(
+        sep=".")[-1]].iloc[-1]["保证金-每手"]*open_volume if not futures_comm_info_df.empty and not futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(sep=".")[-1]].empty else quote.get("margin", np.nan)*open_volume
+
+    cond1 = open_price > 0
+    cond2 = open_price < quote.get("upper_limit", np.nan)*(
+        1-order_price_limit) if direction == "BUY" else open_price > quote.get("lower_limit", np.nan)*(1+order_price_limit)
+    cond3 = open_volume > 0
+    cond4 = abs(market_time-quote_time) < timedelta(seconds=120)
+    cond5 = any([market_time.strftime("%H:%M:%S")
+                in interval for interval in tradingtime_interval])
+    cond6 = symbol.translate(str.maketrans(
+        "", "", digits)) not in excluding_symbol_list
+    cond7 = account["available"] > open_security_deposit
+    cond8 = account["risk_ratio"] < max_risk
+
+    if all([cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8]):
+
+        order = api.insert_order(
+            symbol=symbol, direction=direction, offset=offset, volume=open_volume, limit_price=open_price)
+
+        api.wait_update()
+
+        strategy_orders_dict[order["order_id"]] = order
+
+        if position_info_dict.get(symbol):
+
+            position_info_dict[symbol]["high"] = open_price
+            position_info_dict[symbol]["low"] = open_price
+            position_info_dict[symbol]["status"] = "locked"
+            position_info_dict[symbol]["updated_at"] = market_time
+
+
+def close_position(symbol: str, direction: str, offset: str, volume: int, limit_price: float = None) -> None:
+    """
+    Todo:
+        策略平仓
+
+    Args:
+        symbol(str) : 合约代码
+        direction(str) : 买卖方向
+        offset(str) : 开平方向
+        volume(int) : 手数
+        limit_price(float) : 委托价格
+
+    Returns:
+        None
+    """
+    quote = globals()[symbol + "_quote"] if symbol + \
+        "_quote" in globals() else api.get_quote(symbol=symbol)
+
+    quote_time = time_to_datetime(quote.get("datetime", datetime.now()))
+    market_time = time_to_datetime(
+        main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+    tradingtime_interval = [Interval(i[0], i[1]) for i in [
+        i for i in quote.get("trading_time", {"day": []}).get("day", [])]]+[Interval(i[0], i[1]) for i in [
+            i for i in quote.get("trading_time", {"night": []}).get("night", [])]]
+
+    symbol_position = api.get_position(symbol=symbol)
+
+    close_price = limit_price if limit_price and limit_price % quote.get("price_tick", np.nan) == 0 else quote.get(
+        "last_price", np.nan)
+
+    close_volume = 0
+
+    if direction == "SELL" and offset == "CLOSETODAY":
+
+        close_volume = min(volume, symbol_position["pos_long_today"])
+
+    if direction == "SELL" and offset == "CLOSE":
+
+        close_volume = min(volume, symbol_position["pos_long"])
+
+    if direction == "BUY" and offset == "CLOSETODAY":
+
+        close_volume = min(volume, symbol_position["pos_short_today"])
+
+    if direction == "BUY" and offset == "CLOSE":
+
+        close_volume = min(volume, symbol_position["pos_short"])
+
+    cond1 = close_price > 0
+    cond2 = close_price <= quote.get(
+        "upper_limit", np.nan) if direction == "BUY" else close_price > quote.get("lower_limit", np.nan)
+    cond3 = close_volume > 0
+    cond4 = abs(market_time-quote_time) < timedelta(seconds=120)
+    cond5 = any([market_time.strftime("%H:%M:%S")
+                in interval for interval in tradingtime_interval])
+
+    if all([cond1, cond2, cond3, cond4, cond5]):
+
+        order = api.insert_order(
+            symbol=symbol, direction=direction, offset=offset, volume=close_volume, limit_price=close_price)
+
+        api.wait_update()
+
+        strategy_orders_dict[order["order_id"]] = order
+
+        if position_info_dict.get(symbol):
+
+            position_info_dict[symbol]["target_pos_long"] = position_info_dict[symbol]["target_pos_long"] - \
+                close_volume if direction == "SELL" and position_info_dict[symbol]["pos_long"] == position_info_dict[symbol]["target_pos_long"] else position_info_dict[
+                    symbol]["target_pos_long"]
+            position_info_dict[symbol]["target_pos_short"] = position_info_dict[symbol]["target_pos_short"] - \
+                close_volume if direction == "BUY" and position_info_dict[symbol]["pos_short"] == position_info_dict[symbol]["target_pos_short"] else position_info_dict[
+                    symbol]["target_pos_short"]
+            position_info_dict[symbol]["status"] = "locked"
+            position_info_dict[symbol]["updated_at"] = market_time
+
+
+def close_position_after_cancel(symbol: str, direction: str, offset: str, volume: int) -> None:
+    """
+    Todo:
+        平仓撤单后的追单
+
+    Args:
+        symbol(str) : 合约代码
+        direction(str) : 买卖方向
+        offset(str) : 开平方向
+        volume(int) : 手数
+        limit_price(float) : 委托价格
+
+    Returns:
+        None
+    """
+    quote = globals()[symbol + "_quote"] if symbol + \
+        "_quote" in globals() else api.get_quote(symbol=symbol)
+
+    quote_time = time_to_datetime(quote.get("datetime", datetime.now()))
+    market_time = time_to_datetime(
+        main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+    tradingtime_interval = [Interval(i[0], i[1]) for i in [
+        i for i in quote.get("trading_time", {"day": []}).get("day", [])]]+[Interval(i[0], i[1]) for i in [
+            i for i in quote.get("trading_time", {"night": []}).get("night", [])]]
+
+    symbol_position = api.get_position(symbol=symbol)
+
+    close_price = quote.get(
+        "ask_price1", np.nan) if direction == "BUY" else quote.get("bid_price1", np.nan)
+
+    close_volume = 0
+
+    if direction == "SELL" and offset == "CLOSETODAY":
+
+        close_volume = min(volume, symbol_position["pos_long_today"])
+
+    if direction == "SELL" and offset == "CLOSE":
+
+        close_volume = min(volume, symbol_position["pos_long"])
+
+    if direction == "BUY" and offset == "CLOSETODAY":
+
+        close_volume = min(volume, symbol_position["pos_short_today"])
+
+    if direction == "BUY" and offset == "CLOSE":
+
+        close_volume = min(volume, symbol_position["pos_short"])
+
+    cond1 = close_price > 0
+    cond2 = close_price <= quote.get(
+        "upper_limit", np.nan) if direction == "BUY" else close_price > quote.get("lower_limit", np.nan)
+    cond3 = close_volume > 0
+    cond4 = abs(market_time-quote_time) < timedelta(seconds=120)
+    cond5 = any([market_time.strftime("%H:%M:%S")
+                in interval for interval in tradingtime_interval])
+
+    if all([cond1, cond2, cond3, cond4, cond5]):
+
+        order = api.insert_order(
+            symbol=symbol, direction=direction, offset=offset, volume=close_volume, limit_price=close_price)
+
+        api.wait_update()
+
+        strategy_orders_dict[order["order_id"]] = order
+
+        if position_info_dict.get(symbol):
+
+            position_info_dict[symbol]["status"] = "locked"
+            position_info_dict[symbol]["updated_at"] = market_time
+
+
+def open_market_adj_position() -> None:
+    """
+    Todo:
+        开盘调仓，同步账户与本地文件的持仓信息后，平仓不在持仓列表中的合约，开仓在持仓列表中的合约
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    for symbol, info in position_info_dict.copy().items():
+
+        if symbol not in hold_position_list_long and info["pos_long"] > 0 and info["status"] == "unlocked":
+
+            print(symbol, "不在持有列表中，平多仓")
+
+            if symbol.split(sep=".")[0] in ["SHFE", "INE"]:
+
+                if info["pos_long_his"] > 0:
+
+                    close_position(symbol=symbol, direction="SELL",
+                                   offset="CLOSE", volume=info["pos_long_his"])
+
+            else:
+
+                close_position(symbol=symbol, direction="SELL",
+                               offset="CLOSE", volume=info["pos_long"])
+
+        if symbol not in hold_position_list_short and info["pos_short"] > 0 and info["status"] == "unlocked":
+
+            print(symbol, "不在持有列表中，平空仓")
+
+            if symbol.split(sep=".")[0] in ["SHFE", "INE"]:
+
+                if info["pos_short_his"] > 0:
+
+                    close_position(symbol=symbol, direction="BUY",
+                                   offset="CLOSE", volume=info["pos_short_his"])
+
+            else:
+
+                close_position(symbol=symbol, direction="BUY",
+                               offset="CLOSE", volume=info["pos_short"])
+
+    symbol_list = list(set(hold_position_list_long +
+                       hold_position_list_short + list(position_info_dict.keys())))
+
+    open_position_volume_dict = calc_open_position_volume_dict(
+        symbol_list=symbol_list, max_value=max_value, max_loss=max_loss, n_atr_stop=n_atr_stop)
+    open_security_deposit = (sum([(futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(sep=".")[-1]].iloc[-1]["保证金-每手"]+futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(sep=".")[-1]].iloc[-1]["手续费"])*open_position_volume_dict[symbol]
+                                  if not futures_comm_info_df.empty and not futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(sep=".")[-1]].empty else globals()[symbol+"_quote"].get("margin", np.nan) for symbol in symbol_list]))*1.1
+
+    if account["available"] > open_security_deposit:
+
+        for symbol in hold_position_list_long:
+
+            print(symbol, "在持有列表中，开多仓")
+
+            if symbol not in position_info_dict.keys():
+
+                open_position(symbol=symbol, direction="BUY", offset="OPEN",
+                              volume=open_position_volume_dict[symbol])
+
+            if symbol in position_info_dict.keys() and position_info_dict[symbol]["pos_long"] < open_position_volume_dict[symbol] and position_info_dict[symbol]["status"] == "unlocked":
+
+                open_position(symbol=symbol, direction="BUY", offset="OPEN",
+                              volume=open_position_volume_dict[symbol]-position_info_dict[symbol]["pos_long"])
+
+        for symbol in hold_position_list_short:
+
+            print(symbol, "在持有列表中，开空仓")
+
+            if symbol not in position_info_dict.keys():
+
+                open_position(symbol=symbol, direction="SELL", offset="OPEN",
+                              volume=open_position_volume_dict[symbol])
+
+            if symbol in position_info_dict.keys() and position_info_dict[symbol]["pos_short"] < open_position_volume_dict[symbol] and position_info_dict[symbol]["status"] == "unlocked":
+
+                open_position(symbol=symbol, direction="SELL", offset="OPEN",
+                              volume=open_position_volume_dict[symbol]-position_info_dict[symbol]["pos_short"])
+
+
+def close_market_adj_position() -> None:
+    """
+    Todo:
+        收盘调仓，同步账户与本地文件的持仓信息后，平仓不在持仓列表中的合约，开仓在持仓列表中的合约
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+
+    for symbol, info in position_info_dict.copy().items():
+
+        if symbol not in hold_position_list_long and info["pos_long"] > 0 and info["status"] == "unlocked":
+
+            print(symbol, "不在持有列表中，平多仓")
+
+            if symbol.split(sep=".")[0] in ["SHFE", "INE"]:
+
+                if info["pos_long_today"] > 0:
+
+                    close_position(symbol=symbol, direction="SELL",
+                                   offset="CLOSETODAY", volume=info["pos_long_today"])
+
+                if info["pos_long_his"] > 0:
+
+                    close_position(symbol=symbol, direction="SELL",
+                                   offset="CLOSE", volume=info["pos_long_his"])
+
+            else:
+
+                close_position(symbol=symbol, direction="SELL",
+                               offset="CLOSE", volume=info["pos_long"])
+
+        if symbol not in hold_position_list_short and info["pos_short"] > 0 and info["status"] == "unlocked":
+
+            print(symbol, "不在持有列表中，平空仓")
+
+            if symbol.split(sep=".")[0] in ["SHFE", "INE"]:
+
+                if info["pos_short_today"] > 0:
+
+                    close_position(symbol=symbol, direction="BUY",
+                                   offset="CLOSETODAY", volume=info["pos_short_today"])
+
+                if info["pos_short_his"] > 0:
+
+                    close_position(symbol=symbol, direction="BUY",
+                                   offset="CLOSE", volume=info["pos_short_his"])
+
+            else:
+
+                close_position(symbol=symbol, direction="BUY",
+                               offset="CLOSE", volume=info["pos_short"])
+
+    symbol_list = [symbol for symbol in position_info_dict.keys(
+    ) if symbol in hold_position_list_long+hold_position_list_short]
+
+    open_position_volume_dict = calc_open_position_volume_dict(
+        symbol_list=symbol_list, max_value=max_value, max_loss=max_loss, n_atr_stop=n_atr_stop)
+    open_security_deposit = sum([(futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(sep=".")[-1]].iloc[-1]["保证金-每手"]+futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(sep=".")[-1]].iloc[-1]["手续费"])*open_position_volume_dict[symbol]
+                                 if not futures_comm_info_df.empty and not futures_comm_info_df[futures_comm_info_df["合约代码"] == symbol.split(sep=".")[-1]].empty else globals()[symbol+"_quote"].get("margin", np.nan) for symbol in [symbol for symbol in position_info_dict.keys() if symbol in symbol_list]])*1.1
+
+    if account["available"] > open_security_deposit:
+
+        for symbol in hold_position_list_long:
+
+            if symbol in position_info_dict.keys() and position_info_dict[symbol]["pos_long"] < open_position_volume_dict[symbol] and position_info_dict[symbol]["status"] == "unlocked":
+
+                print(symbol, "在持有列表中，加多仓")
+
+                open_position(symbol=symbol, direction="BUY", offset="OPEN",
+                              volume=open_position_volume_dict[symbol]-position_info_dict[symbol]["pos_long"])
+
+            if symbol in position_info_dict.keys() and position_info_dict[symbol]["pos_long"] > open_position_volume_dict[symbol] and position_info_dict[symbol]["status"] == "unlocked":
+
+                print(symbol, "在持有列表中，平多仓")
+
+                if symbol.split(sep=".")[0] in ["SHFE", "INE"]:
+
+                    close_position_volume_today = min(
+                        position_info_dict[symbol]["pos_long"] - open_position_volume_dict[symbol], position_info_dict[symbol]["pos_long_today"])
+                    close_position_volume = position_info_dict[symbol]["pos_long"] - \
+                        open_position_volume_dict[symbol] - \
+                        close_position_volume_today
+
+                    if close_position_volume_today > 0:
+
+                        close_position(symbol=symbol, direction="SELL",
+                                       offset="CLOSETODAY", volume=close_position_volume_today)
+
+                    if close_position_volume > 0:
+
+                        close_position(symbol=symbol, direction="SELL",
+                                       offset="CLOSE", volume=close_position_volume)
+
+                else:
+
+                    close_position(symbol=symbol, direction="SELL",
+                                   offset="CLOSE", volume=position_info_dict[symbol]["pos_long"]-open_position_volume_dict[symbol])
+
+        for symbol in hold_position_list_short:
+
+            if symbol in position_info_dict.keys() and position_info_dict[symbol]["pos_short"] < open_position_volume_dict[symbol] and position_info_dict[symbol]["status"] == "unlocked":
+
+                print(symbol, "在持有列表中，加空仓")
+
+                open_position(symbol=symbol, direction="SELL", offset="OPEN",
+                              volume=open_position_volume_dict[symbol]-position_info_dict[symbol]["pos_short"])
+
+            if symbol in position_info_dict.keys() and position_info_dict[symbol]["pos_short"] > open_position_volume_dict[symbol] and position_info_dict[symbol]["status"] == "unlocked":
+
+                print(symbol, "在持有列表中，平空仓")
+
+                if symbol.split(sep=".")[0] in ["SHFE", "INE"]:
+
+                    close_position_volume_today = min(
+                        position_info_dict[symbol]["pos_short"] - open_position_volume_dict[symbol], position_info_dict[symbol]["pos_short_today"])
+                    close_position_volume = position_info_dict[symbol]["pos_short"] - \
+                        open_position_volume_dict[symbol] - \
+                        close_position_volume_today
+
+                    if close_position_volume_today > 0:
+
+                        close_position(symbol=symbol, direction="BUY",
+                                       offset="CLOSETODAY", volume=close_position_volume_today)
+
+                    if close_position_volume > 0:
+
+                        close_position(symbol=symbol, direction="BUY",
+                                       offset="CLOSE", volume=close_position_volume)
+
+                else:
+
+                    close_position(symbol=symbol, direction="BUY",
+                                   offset="CLOSE", volume=position_info_dict[symbol]["pos_short"]-open_position_volume_dict[symbol])
+
+
+def sync_position() -> None:
+    """
+    Todo:
+        同步目标持仓和实际持仓
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    for symbol, info in position_info_dict.copy().items():
+
+        if info["target_pos_long"] > info["pos_long"] and info["status"] == "unlocked":
+
+            open_position(symbol=symbol, direction="BUY", offset="OPEN",
+                          volume=info["target_pos_long"]-info["pos_long"])
+
+        if info["target_pos_long"] < info["pos_long"] and info["status"] == "unlocked":
+
+            if symbol.split(sep=".")[0] in ["SHFE", "INE"]:
+
+                close_position_volume_today = min(
+                    info["pos_long"] - info["target_pos_long"], info["pos_long_today"])
+                close_position_volume = info["pos_long"] - \
+                    info["target_pos_long"] - close_position_volume_today
+
+                if close_position_volume_today > 0:
+
+                    close_position(symbol=symbol, direction="SELL",
+                                   offset="CLOSETODAY", volume=close_position_volume_today)
+
+                if close_position_volume > 0:
+
+                    close_position(symbol=symbol, direction="SELL",
+                                   offset="CLOSE", volume=close_position_volume)
+
+            else:
+
+                close_position(symbol=symbol, direction="SELL",
+                               offset="CLOSE", volume=info["pos_long"]-info["target_pos_long"])
+
+        if info["target_pos_short"] > info["pos_short"] and info["status"] == "unlocked":
+
+            open_position(symbol=symbol, direction="SELL", offset="OPEN",
+                          volume=info["target_pos_short"]-info["pos_short"])
+
+        if info["target_pos_short"] < info["pos_short"] and info["status"] == "unlocked":
+
+            if symbol.split(sep=".")[0] in ["SHFE", "INE"]:
+
+                close_position_volume_today = min(
+                    info["pos_short"] - info["target_pos_short"], info["pos_short_today"])
+                close_position_volume = info["pos_short"] - \
+                    info["target_pos_short"] - close_position_volume_today
+
+                if close_position_volume_today > 0:
+
+                    close_position(symbol=symbol, direction="BUY",
+                                   offset="CLOSETODAY", volume=close_position_volume_today)
+
+                if close_position_volume > 0:
+
+                    close_position(symbol=symbol, direction="BUY",
+                                   offset="CLOSE", volume=close_position_volume)
+
+            else:
+
+                close_position(symbol=symbol, direction="BUY",
+                               offset="CLOSE", volume=info["pos_short"]-info["target_pos_short"])
+
+
+def sync_order_local_position_info():
+    """
+    Todo:
+        管理委托单信息与本地文件持仓信息
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    global strategy_orders_dict
+
+    strategy_orders_dict = dict(
+        zip(strategy_orders_dict.keys(), [api.get_order(order_id=symbol) for symbol in strategy_orders_dict.keys()]))
+
+    for order_id in strategy_orders_dict.copy().keys():
+
+        order_info = strategy_orders_dict[order_id]
+        symbol = order_info["exchange_id"]+"."+order_info["instrument_id"]
+
+        market_time = time_to_datetime(
+            main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+        # 委托单仍然有效且有未成交部分
+        if order_info["status"] == "ALIVE" and order_info["volume_left"] > 0:
+            #委托单的下单时间后规定时间内未成交则撤单
+            if order_info["insert_date_time"] > 0 and market_time-time_to_datetime(order_info["insert_date_time"]) > timedelta(seconds=keep_time):
+
+                api.cancel_order(order_or_order_id=order_info["order_id"])
+
+                api.wait_update()
+                # 开平标志：OPEN|CLOSE|CLOSETODAY
+                if order_info["offset"] == "OPEN":
+
+                    open_position_after_cancel(
+                        symbol=symbol, direction=order_info["direction"], offset=order_info["offset"], volume=order_info["volume_left"])
+
+                else:
+
+                    close_position_after_cancel(
+                        symbol=symbol, direction=order_info["direction"], offset=order_info["offset"], volume=order_info["volume_left"])
+        # 委托单已经完成且仍有委托单未成交
+        if order_info["status"] == "FINISHED" and order_info["volume_left"] > 0:
+
+            if order_info["offset"] == "OPEN" and order_info["direction"] == "BUY":
+
+                if symbol not in position_info_dict.keys():
+
+                    position_info_dict[symbol] = {
+                        "symbol": symbol,
+                        "pos": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_long": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_long_today": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_long_his": 0,
+                        "pos_short": 0,
+                        "pos_short_today": 0,
+                        "pos_short_his": 0,
+                        "open_price_long": order_info["trade_price"],
+                        "open_price_short": 0,
+                        "margin_long": 0,
+                        "margin_short": 0,
+                        "target_pos_long": order_info["volume"],
+                        "target_pos_short": 0,
+                        "high": order_info["limit_price"],
+                        "low": order_info["limit_price"],
+                        "status": "locked",
+                        "created_at": market_time,
+                        "updated_at": market_time
+                    }
+
+                else:
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["pos_long"] = position_info_dict[symbol]["pos_long"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["pos_long_today"] = position_info_dict[symbol]["pos_long_today"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["open_price_long"] = (position_info_dict[symbol]["open_price_long"]*position_info_dict[symbol]["pos_long"]+(order_info["volume_orign"]-order_info["volume_left"])*order_info["trade_price"])/(position_info_dict[symbol]["pos_long"]+order_info["volume_orign"]-order_info["volume_left"]) if order_info["volume_orign"]-order_info["volume_left"] > 0 else position_info_dict[symbol]["open_price_long"]
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "OPEN" and order_info["direction"] == "SELL":
+
+                if symbol not in position_info_dict.keys():
+
+                    position_info_dict[symbol] = {
+                        "symbol": symbol,
+                        "pos": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_long": 0,
+                        "pos_long_today": 0,
+                        "pos_long_his": 0,
+                        "pos_short": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_short_today": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_short_his": 0,
+                        "open_price_long": np.nan,
+                        "open_price_short": order_info["trade_price"],
+                        "margin_long": 0,
+                        "margin_short": 0,
+                        "target_pos_long": 0,
+                        "target_pos_short": order_info["volume"],
+                        "high": order_info["limit_price"],
+                        "low": order_info["limit_price"],
+                        "status": "locked",
+                        "created_at": market_time,
+                        "updated_at": market_time
+                    }
+
+                else:
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["pos_short"] = position_info_dict[symbol]["pos_short"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["pos_short_today"] = position_info_dict[symbol]["pos_short_today"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["open_price_short"] = (position_info_dict[symbol]["open_price_short"]*position_info_dict[symbol]["pos_short"]+(order_info["volume_orign"]-order_info["volume_left"])*order_info["trade_price"])/(position_info_dict[symbol]["pos_short"]+order_info["volume_orign"]-order_info["volume_left"]) if order_info["volume_orign"]-order_info["volume_left"] > 0 else position_info_dict[symbol]["open_price_short"]
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "CLOSETODAY" and order_info["direction"] == "BUY":
+
+                if symbol in position_info_dict.keys():
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_short"] = position_info_dict[symbol]["pos_short"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_short_today"] = position_info_dict[symbol]["pos_short_today"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "CLOSETODAY" and order_info["direction"] == "SELL":
+
+                if symbol in position_info_dict.keys():
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_long"] = position_info_dict[symbol]["pos_long"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_long_today"] = position_info_dict[symbol]["pos_long_today"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "CLOSE" and order_info["direction"] == "BUY":
+
+                if symbol in position_info_dict.keys():
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_short"] = position_info_dict[symbol]["pos_short"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "CLOSE" and order_info["direction"] == "SELL":
+
+                if symbol in position_info_dict.keys():
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_long"] = position_info_dict[symbol]["pos_long"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+        # 委托单完成状态且委托单全部成交
+        if order_info["status"] == "FINISHED" and order_info["volume_left"] == 0:
+
+            if order_info["offset"] == "OPEN" and order_info["direction"] == "BUY":
+
+                if symbol not in position_info_dict.keys():
+
+                    position_info_dict[symbol] = {
+                        "symbol": symbol,
+                        "pos": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_long": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_long_today": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_long_his": 0,
+                        "pos_short": 0,
+                        "pos_short_today": 0,
+                        "pos_short_his": 0,
+                        "open_price_long": order_info["trade_price"],
+                        "open_price_short": np.nan,
+                        "margin_long": 0,
+                        "margin_short": 0,
+                        "target_pos_long": order_info["volume"],
+                        "target_pos_short": 0,
+                        "high": order_info["limit_price"],
+                        "low": order_info["limit_price"],
+                        "status": "unlocked",
+                        "created_at": market_time,
+                        "updated_at": market_time
+                    }
+
+                else:
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["pos_long"] = position_info_dict[symbol]["pos_long"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["pos_long_today"] = position_info_dict[symbol]["pos_long_today"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["open_price_long"] = (position_info_dict[symbol]["open_price_long"]*position_info_dict[symbol]["pos_long"]+(order_info["volume_orign"]-order_info["volume_left"])*order_info["trade_price"])/(position_info_dict[symbol]["pos_long"]+order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["status"] = "unlocked"
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "OPEN" and order_info["direction"] == "SELL":
+
+                if symbol not in position_info_dict.keys():
+
+                    position_info_dict[symbol] = {
+                        "symbol": symbol,
+                        "pos": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_long": 0,
+                        "pos_long_today": 0,
+                        "pos_long_his": 0,
+                        "pos_short": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_short_today": order_info["volume_orign"]-order_info["volume_left"],
+                        "pos_short_his": 0,
+                        "open_price_long": np.nan,
+                        "open_price_short": order_info["trade_price"],
+                        "margin_long": 0,
+                        "margin_short": 0,
+                        "target_pos_long": 0,
+                        "target_pos_short": order_info["volume"],
+                        "high": order_info["limit_price"],
+                        "low": order_info["limit_price"],
+                        "status": "unlocked",
+                        "created_at": market_time,
+                        "updated_at": market_time
+                    }
+
+                else:
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["pos_short"] = position_info_dict[symbol]["pos_short"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["pos_short_today"] = position_info_dict[symbol]["pos_short_today"]+order_info["volume_orign"]-order_info["volume_left"]
+                    position_info_dict[symbol
+                                       ]["open_price_short"] = (position_info_dict[symbol]["open_price_short"]*position_info_dict[symbol]["pos_short"]+(order_info["volume_orign"]-order_info["volume_left"])*order_info["trade_price"])/(position_info_dict[symbol]["pos_short"]+order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["status"] = "unlocked"
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "CLOSETODAY" and order_info["direction"] == "BUY":
+
+                if symbol in position_info_dict.keys():
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_short"] = position_info_dict[symbol]["pos_short"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_short_today"] = position_info_dict[symbol]["pos_short_today"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["status"] = "unlocked"
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "CLOSETODAY" and order_info["direction"] == "SELL":
+
+                if symbol in position_info_dict.keys():
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_long"] = position_info_dict[symbol]["pos_long"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_long_today"] = position_info_dict[symbol]["pos_long_today"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["status"] = "unlocked"
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "CLOSE" and order_info["direction"] == "BUY":
+
+                if symbol in position_info_dict.keys():
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_short"] = position_info_dict[symbol]["pos_short"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["status"] = "unlocked"
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            if order_info["offset"] == "CLOSE" and order_info["direction"] == "SELL":
+
+                if symbol in position_info_dict.keys():
+
+                    position_info_dict[symbol
+                                       ]["pos"] = position_info_dict[symbol]["pos"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["pos_long"] = position_info_dict[symbol]["pos_long"]-(order_info["volume_orign"]-order_info["volume_left"])
+                    position_info_dict[symbol
+                                       ]["status"] = "unlocked"
+                    position_info_dict[symbol
+                                       ]["updated_at"] = market_time
+
+            strategy_orders_dict.pop(order_id)
+
+
+def account_risk_manage() -> None:
+    """
+    Todo:
+        针对账户风险的风险管理
+        比如大额亏损、异常手续费、频繁报撤单(申报费的考虑)、频繁开平仓
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    all_order_dict = get_all_orders_dict()
+    all_trades_dict = get_all_trades_dict()
+    # 大额亏损
+    cond1 = account["float_profit"] < account["balance"]*-0.05
+    # 异常手续费
+    cond2 = account["commission"] > account["balance"]*0.003
+    # 频繁报撤单
+    cond3 = len(all_order_dict) > 2000
+    # 频繁开平仓
+    open_trade_dict = dict(zip([info["trade_date_time"] for trade_id, info in all_trades_dict.copy().items(
+    ) if info["offset"] == "OPEN"], [info for trade_id, info in all_trades_dict.copy().items() if info["offset"] == "OPEN"]))
+    close_trade_dict = dict(zip([info["trade_date_time"] for trade_id, info in all_trades_dict.copy().items(
+    ) if info["offset"] == "CLOSETODAY" or info["offset"] == "CLOSE"], [info for trade_id, info in all_trades_dict.copy().items() if info["offset"] == "CLOSETODAY" or info["offset"] == "CLOSE"]))
+    last_open_trade_time = max(
+        open_trade_dict.keys()) if open_trade_dict.keys() else 0
+    last_close_trade_time = max(
+        close_trade_dict.keys()) if close_trade_dict.keys() else 0
+    cond4 = abs(time_to_datetime(last_open_trade_time) - time_to_datetime(last_close_trade_time)) < timedelta(
+        seconds=60) and open_trade_dict[last_open_trade_time]["instrument_id"] == close_trade_dict[last_close_trade_time]["instrument_id"] if last_open_trade_time != 0 and last_close_trade_time != 0 else False
+
+    if any([cond1, cond2, cond3, cond4]):
+
+        if cond1:
+
+            print("账户发生大额亏损撤销所有委托单程序暂停")
+
+        if cond2:
+
+            print("账户发生异常手续费撤销所有委托单程序暂停")
+
+        if cond3:
+
+            print("账户发生频繁报撤单撤销所有委托单程序暂停")
+
+        if cond4:
+
+            print("账户发生频繁开平仓撤销所有委托单程序暂停")
+
+        for order_id, order_info in all_order_dict.copy().items():
+
+            if order_info["status"] == "ALIVE":
+
+                api.cancel_order(order_or_order_id=order_id)
+
+                api.wait_update()
+
+        for symbol, info in position_info_dict.copy().items():
+
+            if info["status"] == "unlocked":
+
+                position_info_dict[symbol]["status"] = "locked"
+
+        api.close()
+        print("API已断开")
+        exit(0)
+
+
+def position_risk_manage() -> None:
+    """
+    Todo:
+        针对持仓风险的风险管理
+        单品种的止盈止损
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    for symbol, info in position_info_dict.copy().items():
+
+        klines_day = globals()[symbol + "_day_klines"] if symbol + "_day_klines" in globals(
+        ) else api.get_kline_serial(symbol=symbol, duration_seconds=60*60*24, data_length=200)
+        klines_min = globals()[symbol + "_min_klines"] if symbol + "_min_klines" in globals(
+        ) else api.get_kline_serial(symbol=symbol, duration_seconds=60, data_length=555)
+        
+        index_klines_day = globals()[all_cont_index_dict[symbol]+"_day_klines"] if all_cont_index_dict[symbol] + \
+            "_day_klines" in globals() else api.get_kline_serial(
+            symbol=all_cont_index_dict[symbol], duration_seconds=60*60*24, data_length=200)
+
+        atr_value = ATR(
+            df=klines_day, n=14).iloc[-1]["atr"] if not klines_day.empty else np.nan
+        stop_price_long = max(info["open_price_long"],
+                              info["high"]) - atr_value * n_atr_stop if info["pos_long"] > 0 and info["open_price_long"] > 0 and info["high"] > 0 else np.nan
+        stop_price_short = min(info["open_price_short"],
+                               info["low"]) + atr_value * n_atr_stop if info["pos_short"] > 0 and info["open_price_short"] > 0 and info["low"] > 0 else np.nan
+
+        max_volume = np.percentile(
+            a=klines_min["volume"], q=99) if not klines_min.empty else np.nan
+
+        cond1 = info["pos_long"] > 0 and info["status"] == "unlocked"
+        cond2 = all(klines_min.iloc[-15:]["close"] <
+                    stop_price_long) if not klines_min.empty else False
+        cond3 = klines_day.iloc[-1]["high"] < klines_day.iloc[-2]["high"] and klines_min.iloc[-2][
+            "volume"] >= max_volume and klines_min.iloc[-3]["volume"] >= max_volume if not klines_day.empty and not klines_min.empty else False
+
+        cond5 = info["pos_short"] > 0 and info["status"] == "unlocked"
+        cond6 = all(klines_min.iloc[-15:]["close"] >
+                    stop_price_short) if not klines_min.empty else False
+        cond7 = klines_day.iloc[-1]["low"] > klines_day.iloc[-2]["low"] and klines_min.iloc[-2][
+            "volume"] >= max_volume and klines_min.iloc[-3]["volume"] >= max_volume if not klines_day.empty and not klines_min.empty else False
+        
+        cond8 =index_klines_day.iloc[-2]["close_oi"] < index_klines_day.iloc[-2]["close_oi"] if not index_klines_day.empty else False
+
+        if cond1 and (cond2 or (cond3 and cond8)):
+
+            print(symbol, "多头止损")
+
+            if symbol.split(sep=".")[0] in ["INE", "SHFE"]:
+
+                close_volume_today = info["pos_long_today"]
+                close_volume = info["pos_long"]-close_volume_today
+
+                if close_volume_today > 0:
+
+                    close_position(symbol=symbol, direction="SELL",
+                                   offset="CLOSETODAY", volume=close_volume_today)
+
+                if close_volume > 0:
+
+                    close_position(symbol=symbol, direction="SELL",
+                                   offset="CLOSE", volume=close_volume)
+
+            else:
+
+                close_position(symbol=symbol, direction="SELL",
+                               offset="CLOSE", volume=info["pos_long"])
+
+        if cond5 and (cond6 or (cond7 and cond8)):
+
+            print(symbol, "空头止损")
+
+            if symbol.split(sep=".")[0] in ["INE", "SHFE"]:
+
+                close_volume_today = info["pos_short_today"]
+                close_volume = info["pos_short"]-close_volume_today
+
+                if close_volume_today > 0:
+
+                    close_position(symbol=symbol, direction="BUY",
+                                   offset="CLOSETODAY", volume=close_volume_today)
+
+                if close_volume > 0:
+
+                    close_position(symbol=symbol, direction="BUY",
+                                   offset="CLOSE", volume=close_volume)
+
+            else:
+
+                close_position(symbol=symbol, direction="BUY",
+                               offset="CLOSE", volume=info["pos_short"])
+
+
+def grid_strategy_today() -> None:
+    """
+    Todo:
+        日内交易策略
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    all_order_dict = get_all_orders_dict()
+
+    for symbol in [symbol for symbol, info in position_info_dict.copy().items() if info["pos_long"] > 0 and info["status"] == "unlocked"]:
+
+        quote = globals()[symbol + "_quote"] if symbol + \
+            "_quote" in globals() else api.get_quote(symbol=symbol)
+
+        market_time = time_to_datetime(
+            main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+        # 当日均价
+        avg_price = quote.get("average", np.nan)
+        open_price_long = position_info_dict[symbol]["open_price_long"] if position_info_dict.get(
+            symbol) and position_info_dict[symbol]["open_price_long"] > 0 else avg_price
+
+        buy_times = len([order_id for order_id, order_info in all_order_dict.copy().items(
+        ) if order_info["instrument_id"] == symbol.split(sep=".")[-1] and order_info["direction"] == "BUY" and order_info["offset"] == "OPEN" and order_info["status"] == "FINISHED" and order_info["volume_left"] == 0])
+        sell_times = len([order_id for order_id, order_info in all_order_dict.copy().items(
+        ) if order_info["instrument_id"] == symbol.split(sep=".")[-1] and order_info["direction"] == "SELL" and (order_info["offset"] == "CLOSETODAY" or order_info["offset"] == "CLOSE") and order_info["status"] == "FINISHED" and order_info["volume_left"] == 0])
+
+        grid_price_list_buy = [min(open_price_long, avg_price)-i *
+                               (avg_price*grid_region) for i in range(1, grid_amount+1)]
+        grid_volume_buy = int(
+            max_value_today/quote.get("last_price", np.nan)/quote.get("volume_multiple", 20) / grid_amount) if buy_times < grid_amount and (max_value_today/quote.get("last_price", np.nan)/quote.get("volume_multiple", 20) / grid_amount) > 0 else 0
+        grid_volume_buy_last = (int(
+            max_value_today/quote.get("last_price", np.nan)/quote.get("volume_multiple", 20) / grid_amount) - grid_volume_buy)*grid_amount if buy_times < grid_amount and (max_value_today/quote.get("last_price", np.nan)/quote.get("volume_multiple", 20) / grid_amount) > 0 else 0
+        grid_volume_list_buy = [grid_volume_buy] * \
+            (grid_amount-1)+[grid_volume_buy+grid_volume_buy_last]
+
+        grid_price_list_sell = [max(open_price_long, avg_price)+i *
+                                (avg_price*grid_region) for i in range(0, grid_amount)]
+        grid_volume_sell = min(int(position_info_dict[symbol]["pos_long_today"] / grid_amount),
+                               grid_volume_buy) if sell_times < grid_amount and position_info_dict.get(symbol) else 0
+        grid_volume_sell_last = (min(int(position_info_dict[symbol]["pos_long_today"] / grid_amount),
+                                     grid_volume_buy) - grid_volume_sell)*grid_amount if sell_times < grid_amount and position_info_dict.get(symbol) else 0
+        grid_volume_list_sell = [grid_volume_sell] * \
+            (grid_amount-1)+[grid_volume_sell+grid_volume_sell_last]
+
+        now = datetime.now()
+        cond1 = datetime(now.year, now.month, now.day, open_position_time[0].hour, open_position_time[0].minute)+timedelta(
+            minutes=5) < market_time < datetime(now.year, now.month, now.day, close_position_time[0].hour, close_position_time[0].minute)-timedelta(minutes=5) or datetime(now.year, now.month, now.day, open_position_time[-1].hour, open_position_time[-1].minute)+timedelta(minutes=5) < market_time < datetime(now.year, now.month, now.day, close_position_time[-1].hour, close_position_time[-1].minute)-timedelta(minutes=5)
+        cond2 = avg_price > 0
+
+        cond3 = buy_times < grid_amount
+        cond4 = not [order_id for order_id, order_info in all_order_dict.copy().items(
+        ) if order_info["instrument_id"] == symbol.split(sep=".")[-1] and order_info["direction"] == "BUY" and order_info["offset"] == "OPEN" and order_info["status"] == "ALIVE"]
+        cond5 = quote.get(
+            "last_price", np.nan) <= grid_price_list_buy[buy_times] if buy_times < grid_amount else False
+        cond6 = grid_volume_list_buy[buy_times] > 0 if buy_times < grid_amount else False
+
+        cond7 = sell_times < buy_times < grid_amount
+        cond8 = not [order_id for order_id, order_info in all_order_dict.copy().items() if order_info["instrument_id"] == symbol.split(
+            sep=".")[-1] and order_info["direction"] == "SELL" and (order_info["offset"] == "CLOSETODAY" or order_info["offset"] == "CLOSE") and order_info["status"] == "ALIVE"]
+        cond9 = quote.get(
+            "last_price", np.nan) >= grid_price_list_sell[sell_times] if sell_times < grid_amount else False
+        cond10 = grid_volume_list_sell[sell_times] > 0 if sell_times < grid_amount else False
+
+        if all([cond1, cond2, cond3, cond4, cond5, cond6]):
+
+            print(market_time, symbol, "日内交易信号，开多仓")
+
+            open_position(symbol=symbol, direction="BUY", offset="OPEN",
+                          volume=grid_volume_list_buy[buy_times], limit_price=grid_price_list_buy[buy_times])
+
+        if all([cond1, cond2, cond7, cond8, cond9, cond10]):
+
+            print(market_time, symbol, "日内交易信号，平多仓")
+
+            close_position(symbol=symbol, direction="SELL", offset="CLOSETODAY" if symbol.split(sep=".")[0] in ["SHFE", "INE"] else "CLOSE",
+                           volume=grid_volume_list_sell[sell_times], limit_price=grid_price_list_sell[sell_times])
+
+    for symbol in [symbol for symbol, info in position_info_dict.copy().items() if info["pos_short"] > 0 and info["status"] == "unlocked"]:
+
+        quote = globals()[symbol + "_quote"] if symbol + \
+            "_quote" in globals() else api.get_quote(symbol=symbol)
+
+        market_time = time_to_datetime(
+            main_symbol_quote["datetime"]) if main_symbol_quote else datetime.now()
+        avg_price = quote.get("average", np.nan)
+        open_price_short = position_info_dict[symbol]["open_price_short"] if position_info_dict.get(
+            symbol) and position_info_dict[symbol]["open_price_short"] > 0 else avg_price
+
+        sell_times = len([order_id for order_id, order_info in all_order_dict.copy().items(
+        ) if order_info["instrument_id"] == symbol.split(sep=".")[-1] and order_info["direction"] == "SELL" and order_info["offset"] == "OPEN" and order_info["status"] == "FINISHED" and order_info["volume_left"] == 0])
+        buy_times = len([order_id for order_id, order_info in all_order_dict.copy().items(
+        ) if order_info["instrument_id"] == symbol.split(sep=".")[-1] and order_info["direction"] == "BUY" and (order_info["offset"] == "CLOSETODAY" or order_info["offset"] == "CLOSE") and order_info["status"] == "FINISHED" and order_info["volume_left"] == 0])
+
+        grid_price_list_sell = [max(open_price_short, avg_price)+i *
+                                (avg_price*grid_region) for i in range(1, grid_amount+1)]
+        grid_volume_sell = int(
+            max_value_today/quote.get("last_price", np.nan)/quote.get("volume_multiple", 20) / grid_amount) if sell_times < grid_amount and (max_value_today/quote.get("last_price", np.nan)/quote.get("volume_multiple", 20) / grid_amount) > 0 else 0
+        grid_volume_sell_last = (int(
+            max_value_today/quote.get("last_price", np.nan)/quote.get("volume_multiple", 20) / grid_amount) - grid_volume_sell)*grid_amount if sell_times < grid_amount and (max_value_today/quote.get("last_price", np.nan)/quote.get("volume_multiple", 20) / grid_amount) > 0 else 0
+        grid_volume_list_sell = [grid_volume_sell] * \
+            (grid_amount-1)+[grid_volume_sell+grid_volume_sell_last]
+
+        grid_price_list_buy = [min(open_price_short, avg_price)-i *
+                               (avg_price*grid_region) for i in range(0, grid_amount)]
+        grid_volume_buy = min(int(position_info_dict[symbol]["pos_short_today"] / grid_amount),
+                              grid_volume_sell) if buy_times < grid_amount and position_info_dict.get(symbol) else 0
+        grid_volume_buy_last = (min(int(position_info_dict[symbol]["pos_short_today"] / grid_amount),
+                                    grid_volume_sell) - grid_volume_sell)*grid_amount if buy_times < grid_amount and position_info_dict.get(symbol) else 0
+        grid_volume_list_buy = [grid_volume_buy] * \
+            (grid_amount-1)+[grid_volume_buy+grid_volume_buy_last]
+
+        now = datetime.now()
+        cond1 = datetime(now.year, now.month, now.day, open_position_time[0].hour, open_position_time[0].minute)+timedelta(
+            minutes=5) < market_time < datetime(now.year, now.month, now.day, close_position_time[0].hour, close_position_time[0].minute)-timedelta(minutes=5) or datetime(now.year, now.month, now.day, open_position_time[-1].hour, open_position_time[-1].minute)+timedelta(minutes=5) < market_time < datetime(now.year, now.month, now.day, close_position_time[-1].hour, close_position_time[-1].minute)-timedelta(minutes=5)
+        cond2 = avg_price > 0
+
+        cond3 = sell_times < grid_amount
+        cond4 = not [order_id for order_id, order_info in all_order_dict.copy().items(
+        ) if order_info["instrument_id"] == symbol.split(sep=".")[-1] and order_info["direction"] == "SELL" and order_info["offset"] == "OPEN" and order_info["status"] == "ALIVE"]
+        cond5 = quote.get(
+            "last_price", np.nan) >= grid_price_list_sell[sell_times] if sell_times < grid_amount else False
+        cond6 = grid_volume_list_sell[sell_times] > 0 if sell_times < grid_amount else False
+
+        cond7 = buy_times < sell_times < grid_amount
+        cond8 = not [order_id for order_id, order_info in all_order_dict.copy().items() if order_info["instrument_id"] == symbol.split(
+            sep=".")[-1] and order_info["direction"] == "BUY" and (order_info["offset"] == "CLOSETODAY" or order_info["offset"] == "CLOSE") and order_info["status"] == "ALIVE"]
+        cond9 = quote.get(
+            "last_price", np.nan) <= grid_price_list_buy[buy_times] if buy_times < grid_amount else False
+        cond10 = grid_volume_list_buy[buy_times] > 0 if buy_times < grid_amount else False
+
+        if all([cond1, cond2, cond3, cond4, cond5, cond6]):
+
+            print(market_time, symbol, "日内交易信号，开空仓")
+
+            open_position(symbol=symbol, direction="SELL", offset="OPEN",
+                          volume=grid_volume_list_sell[sell_times], limit_price=grid_price_list_sell[sell_times])
+
+        if all([cond1, cond2, cond7, cond8, cond9, cond10]):
+
+            print(market_time, symbol, "日内交易信号，平空仓")
+
+            close_position(symbol=symbol, direction="BUY", offset="CLOSETODAY" if symbol.split(sep=".")[0] in ["SHFE", "INE"] else "CLOSE",
+                           volume=grid_volume_list_buy[buy_times], limit_price=grid_price_list_buy[buy_times])
+
+
+def in_the_trading_adj_position() -> None:
+    """
+    Todo:
+        盘中调整持仓
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    # 管理委托单信息与本地文件持仓信息
+    sync_order_local_position_info()
+    sync_position_info_dict()
+    sync_position()
+
+    account_risk_manage()
+    position_risk_manage()
+    grid_strategy_today()
+
+
+set_global_parameter()
+tqkq_log_in()
+set_global_var()
+
+
+while True:
+
+    api.wait_update()
+
+    # 主合约分钟K线刷新驱动策略
+    if api.is_changing(obj=main_symbol_klines.iloc[-1], key="datetime"):
+
+        in_the_trading_adj_position()
+
+        klines_time_now = time_to_datetime(
+            main_symbol_klines.iloc[-1]["datetime"])
+
+        if time(klines_time_now.hour, klines_time_now.minute) in open_position_time:
+
+            open_market_adj_position()
+
+        if time(klines_time_now.hour, klines_time_now.minute) in close_position_time:
+
+            close_market_adj_position()
